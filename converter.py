@@ -15,13 +15,38 @@ fn_feature_coord = lambda f: f['geometry']['coordinates']
 fn_feature_elevation = lambda f: int(f['properties']['elevation'])
 layer_height = 0   # Set when the file is loaded.
 
+class CoordinateConverter:
+    def __init__(self, setting="latlon"):
+        self._converter = getattr(self, f"convert_{setting}", False)
+        self.setting = setting
+        assert self._converter
+
+
+    def convert(self, geojson, lonlat):
+        return self._converter(geojson, lonlat)
+        
+    def convert_latlon(self, geojson, lonlat):
+        return (lonlat[0], lonlat[1])
+
+    def convert_tanlon(self, geojson, lonlat):
+        x = (math.tan(lonlat[0]) - math.tan(geojson['metadata']['min_lon']))
+        y = (geojson['metadata']['max_lat'] - lonlat[1])
+        return (x,y)
+
+    def convert_straight(self, geojson, lonlat):
+        x = (lonlat[0] - geojson['metadata']['min_lon'])
+        y = (geojson['metadata']['max_lat'] - lonlat[1])
+        return (x,y)
+
+
+
 # XY[Z] points are specified as (x,y[,z])
 # Lines are specified as ((x,y[,z]),(x,y[,z]))
 
-def load_geojson(filename: str):
+def load_geojson(filename: str, coordinate_converter: CoordinateConverter) -> dict:
     geojson = json.loads(open(filename,'r').read())
     assert geojson['type'] == 'FeatureCollection', geojson.get('type')
-    assert 'metadata' in geojson.keys()
+    assert 'metadata' in geojson.keys(), "Run geojsonreader.py first"
     return geojson
 
 
@@ -107,6 +132,8 @@ def write_svg(feature_list: list, filename: str, scale_to=600):
                 min_y = coord[1]
             if coord[1] > max_y:
                 max_y = coord[1]
+    if min_y == max_y:
+        pdb.set_trace()  # Why is this zero?
     if (max_x - min_x) > (max_y - min_y):
         scaling_factor = scale_to/(max_x - min_x)
     else:
@@ -121,6 +148,27 @@ def write_svg(feature_list: list, filename: str, scale_to=600):
 def write_json(feature_list: list, filename: str):
     with open(filename,'w') as f:
         f.write(json.dumps(dict(feature_list=feature_list), indent=2))
+
+def scale_features(geojson, converter, scale_to):
+    # Scale X and Y. We scale to a fixed width, and allow height to be
+    # proportionate.
+    x1, y1 = converter.convert(geojson, (geojson['metadata']['max_lon'], geojson['metadata']['max_lat']))
+    x2, y2 = converter.convert(geojson, (geojson['metadata']['min_lon'], geojson['metadata']['min_lat']))
+    min_x, max_x = sorted([abs(x1),abs(x2)])
+    min_y, max_y = sorted([abs(y1),abs(y2)])
+    
+    if (max_y - min_y) > (max_x - min_x):
+        unit_size = scale_to / (max_y - min_y)
+        logging.info(f"vertical distance (latitude or Y) is bigger, unit_size={unit_size}")
+    else:
+        unit_size = scale_to / (max_x - min_y)
+        logging.info(f"horizontal distance (longitude or X) is bigger, unit_size={unit_size}")        
+    geojson['metadata']['scale_unit_size'] = unit_size
+    for f in geojson['features']:
+        for idx in range(len(f['geometry']['coordinates'])):
+            f['geometry']['coordinates'][idx][0] = f['geometry']['coordinates'][idx][0] * unit_size
+            f['geometry']['coordinates'][idx][1] = f['geometry']['coordinates'][idx][1] * unit_size            
+    return geojson
 
 def main():
     arg_parser = argparse.ArgumentParser(
@@ -138,6 +186,12 @@ def main():
                             action="store_true")
     arg_parser.add_argument("-l", "--log",
                             help="Set loglevel as DEBUG, INFO, WARNING, ERROR, or CRITICAL.")
+    arg_parser.add_argument("-c", "--coordinate_converter",
+                            help="Coordinate converter (latlon, straight, tanlon)",
+                            default="latlon")
+    arg_parser.add_argument("-s", "--scale",
+                            help="Scale the largest dimension to this size",
+                            default=0, type=int)    
 
     args = arg_parser.parse_args()
     if getattr(args, 'log'):
@@ -147,7 +201,11 @@ def main():
             raise ValueError('Invalid log level: %s' % loglevel)
         logging.basicConfig(level=numeric_loglevel)
         
-    geojson = load_geojson(args.input_geojson)
+    coordinate_converter = CoordinateConverter(args.coordinate_converter)
+
+    geojson = load_geojson(args.input_geojson, coordinate_converter)
+    scale_features(geojson, coordinate_converter, getattr(args, "scale", 500))
+
     feature_indices = list()
     if getattr(args, 'feature_list'):
         feature_indices = [int(f.strip()) for f in args.feature_list.split(",")]
@@ -156,7 +214,6 @@ def main():
         output_dir = args.output_dir
     else:
         output_dir = "output-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-
     features_to_export = list()
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
