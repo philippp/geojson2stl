@@ -11,9 +11,10 @@ import math
 # Botom Right: 37.736389093383096, -122.45053356855081
 import inspect
 
-TOTAL_HEIGHT = 10
+
 fn_feature_coord = lambda f: f['geometry']['coordinates']
-fn_feature_elevation = lambda f: int(f['properties']['elevation'])
+ELEVATION_SCALE_TO_M = 0.3048  # Feet to meters - change depending on fn_feature_elevation source.
+fn_feature_elevation = lambda f: int(f['properties']['elevation']) * ELEVATION_SCALE_TO_M
 
 def load(filename: str):
     geojson = json.loads(open(filename,'r').read())
@@ -41,13 +42,14 @@ def update_metadata(geojson):
             if c_lat > max_lat:
                 max_lat = c_lat
         cur_feature_elevation = fn_feature_elevation(f)
+        f['properties']['elevation_m'] = cur_feature_elevation
         if cur_feature_elevation > max_elevation:
             max_elevation = cur_feature_elevation
         if cur_feature_elevation < min_elevation:
             min_elevation = cur_feature_elevation
         all_elevations.add(cur_feature_elevation)
-    geojson['metadata']['max_elevation'] = max_elevation
-    geojson['metadata']['min_elevation'] = min_elevation
+    geojson['metadata']['max_elevation_m'] = max_elevation
+    geojson['metadata']['min_elevation_m'] = min_elevation
     geojson['metadata']['max_lon'] = max_lon
     geojson['metadata']['min_lon'] = min_lon
     geojson['metadata']['max_lat'] = max_lat
@@ -56,7 +58,7 @@ def update_metadata(geojson):
 
     elevation_list = sorted(all_elevations)
     logging.info(f"Elevations: {elevation_list}")
-    step_sizes = set(elevation_list[i] - elevation_list[i-1] for i in range(1, len(elevation_list)))
+    step_sizes = set(int(elevation_list[i] - elevation_list[i-1]) for i in range(1, len(elevation_list)))
     if len(step_sizes) > 1:
         logging.info(f"Found {len(step_sizes)} distinct elevation step changes: {list(step_sizes)}")
     logging.info(f"{len(elevation_list)} layers have data.")

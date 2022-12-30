@@ -8,6 +8,7 @@ import argparse
 import os
 import datetime
 import logging
+import geo_xy
 
 TOTAL_HEIGHT = 1
 scaled_side = 1000
@@ -132,8 +133,6 @@ def write_svg(feature_list: list, filename: str, scale_to=600):
                 min_y = coord[1]
             if coord[1] > max_y:
                 max_y = coord[1]
-    if min_y == max_y:
-        pdb.set_trace()  # Why is this zero?
     if (max_x - min_x) > (max_y - min_y):
         scaling_factor = scale_to/(max_x - min_x)
     else:
@@ -152,24 +151,35 @@ def write_json(feature_list: list, filename: str):
 def scale_features(geojson, converter, scale_to):
     # Scale X and Y. We scale to a fixed width, and allow height to be
     # proportionate.
-    x1, y1 = converter.convert(geojson, (geojson['metadata']['max_lon'], geojson['metadata']['max_lat']))
-    x2, y2 = converter.convert(geojson, (geojson['metadata']['min_lon'], geojson['metadata']['min_lat']))
+    geo_meta = geojson['metadata']
+    x1, y1 = converter.convert(geojson, (geo_meta['max_lon'], geo_meta['max_lat']))
+    x2, y2 = converter.convert(geojson, (geo_meta['min_lon'], geo_meta['min_lat']))
     min_x, max_x = sorted([abs(x1),abs(x2)])
     min_y, max_y = sorted([abs(y1),abs(y2)])
-
+    longest_edge_m = 0
     if (max_y - min_y) > (max_x - min_x):
+        # Y is bigger (map is taller)
         unit_size = scale_to / (max_y - min_y)
-        logging.info(f"vertical distance (latitude or Y) is bigger, unit_size={unit_size}")
-    else:
+        longest_edge_m = geo_xy.haversine([[x1,y1],[x1,y2]]) * 1000
+        logging.info(f"Y > X, unit_size={unit_size}, distance={longest_edge_m}")
+    else:  # X is bigger (map is wider)
         unit_size = scale_to / (max_x - min_x)
-        logging.info(f"horizontal distance (longitude or X) is bigger, unit_size={unit_size}")
-    geojson['metadata']['scale_unit_size'] = unit_size
-    if scale_to != 0:
-        for f in geojson['features']:
-            for idx in range(len(f['geometry']['coordinates'])):
-                new_x, new_y = converter.convert(geojson, f['geometry']['coordinates'][idx])
-                f['geometry']['coordinates'][idx][0] = new_x * unit_size
-                f['geometry']['coordinates'][idx][1] = new_y * unit_size
+        longest_edge_m = geo_xy.haversine([[x1,y1],[x2,y1]]) * 1000
+        logging.info(f"X > Y, unit_size={unit_size}, distance={longest_edge_m}")
+    geo_meta['scale_unit_size'] = unit_size
+    new_z_max = ((geo_meta['max_elevation_m'] - geo_meta['min_elevation_m'])/longest_edge_m)*scale_to
+    for f in geojson['features']:
+        f_elevation_m = f['properties']['elevation_m']
+        z_value = (f_elevation_m - geo_meta['min_elevation_m']) / longest_edge_m * scale_to
+        for idx in range(len(f['geometry']['coordinates'])):
+            new_x, new_y = converter.convert(geojson, f['geometry']['coordinates'][idx])
+            f['geometry']['coordinates'][idx][0] = new_x * unit_size
+            f['geometry']['coordinates'][idx][1] = new_y * unit_size
+            f['geometry']['coordinates'][idx].append(z_value)
+
+    # Scale Z. Geojsonreader stored the elevation in meters, which we need to scale
+    # based on the physical distance of the largest edge.
+
     return geojson
 
 def main():
@@ -193,7 +203,7 @@ def main():
                             default="latlon")
     arg_parser.add_argument("-s", "--scale",
                             help="Scale the largest dimension to this size",
-                            default=0, type=int)
+                            default=1, type=int)
 
     args = arg_parser.parse_args()
     if getattr(args, 'log'):
