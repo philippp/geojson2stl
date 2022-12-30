@@ -18,7 +18,7 @@ fn_feature_elevation = lambda f: int(f['properties']['elevation'])
 def load(filename: str):
     geojson = json.loads(open(filename,'r').read())
     assert geojson['type'] == 'FeatureCollection', geojson.get('type')
-    return update_metadata(geojson)    
+    return update_metadata(geojson)
 
 def update_metadata(geojson):
     """
@@ -64,7 +64,7 @@ def update_metadata(geojson):
     # Longitude gets larger going from west to east (left to right)
     # Latitude gets larger from south to north (bottom to top)
     # We will start our coordinate system with (0,0) at the bottom left.
-    
+
     for idx in range(len(geojson['features'])):
         f = geojson['features'][idx]
         new_coordinates = list()
@@ -82,9 +82,9 @@ def prune(geojson, left_top, right_bottom):
     for feature in geojson['features']:
         feature['geometry']['coordinates'] = _prune_coords(feature['geometry']['coordinates'], left_top, right_bottom)
         if feature['geometry']['coordinates']:
-            logging.debug(f"[prune] Keeping feature idx={geojson['features'].index(feature)}")            
+            logging.debug(f"[prune] Keeping feature idx={geojson['features'].index(feature)}")
             feature_list.append(feature)
-    logging.info(f"[{inspect.stack()[0][3]}] Kept {len(feature_list)} out of {len(geojson['features'])} features.")            
+    logging.info(f"[{inspect.stack()[0][3]}] Kept {len(feature_list)} out of {len(geojson['features'])} features.")
     geojson['features'] = feature_list
     return geojson
 
@@ -99,7 +99,7 @@ def _prune_coords(coords, left_top, right_bottom):
     coords = geo_xy.cut_polygon(coords, left_top[0], 0, 'ge')
     coords = geo_xy.cut_polygon(coords, left_top[1], 1, 'le')
     coords = geo_xy.cut_polygon(coords, right_bottom[0], 0, 'le')
-    coords = geo_xy.cut_polygon(coords, right_bottom[1], 1, 'ge')    
+    coords = geo_xy.cut_polygon(coords, right_bottom[1], 1, 'ge')
     return coords
 
 def project_latlon_to_xy(geojson, latlon):
@@ -153,5 +153,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    

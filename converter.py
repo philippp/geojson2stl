@@ -24,7 +24,7 @@ class CoordinateConverter:
 
     def convert(self, geojson, lonlat):
         return self._converter(geojson, lonlat)
-        
+
     def convert_latlon(self, geojson, lonlat):
         return (lonlat[0], lonlat[1])
 
@@ -81,14 +81,14 @@ def write_rect_facets(xy1, xy2, height_top, height_bottom=0):
     f2_surface = numpy.cross(f2_p2-f2_p1, f2_p3-f2_p1)
     f2_surface_normal = f2_surface / f2_surface.sum()
     return f"""
-facet normal {f1_surface_normal[0]} {f1_surface_normal[1]} {f1_surface_normal[2]} 
+facet normal {f1_surface_normal[0]} {f1_surface_normal[1]} {f1_surface_normal[2]}
     outer loop
         vertex {xy2[0]} {xy2[1]} {height_bottom}
         vertex {xy1[0]} {xy1[1]} {height_bottom}
         vertex {xy2[0]} {xy2[1]} {height_top}
     endloop
 endfacet
-facet normal {f2_surface_normal[0]} {f2_surface_normal[1]} {f2_surface_normal[2]} 
+facet normal {f2_surface_normal[0]} {f2_surface_normal[1]} {f2_surface_normal[2]}
     outer loop
         vertex {xy1[0]} {xy1[1]} {height_bottom}
         vertex {xy1[0]} {xy1[1]} {height_top}
@@ -138,7 +138,7 @@ def write_svg(feature_list: list, filename: str, scale_to=600):
         scaling_factor = scale_to/(max_x - min_x)
     else:
         scaling_factor = scale_to/(max_y - min_y)
-        
+
     with open(filename,'w') as f:
         f.write(f'<svg viewBox="0 0 {scale_to} {scale_to}" xmlns="http://www.w3.org/2000/svg">\n')
         for feature in feature_list:
@@ -156,18 +156,20 @@ def scale_features(geojson, converter, scale_to):
     x2, y2 = converter.convert(geojson, (geojson['metadata']['min_lon'], geojson['metadata']['min_lat']))
     min_x, max_x = sorted([abs(x1),abs(x2)])
     min_y, max_y = sorted([abs(y1),abs(y2)])
-    
+
     if (max_y - min_y) > (max_x - min_x):
         unit_size = scale_to / (max_y - min_y)
         logging.info(f"vertical distance (latitude or Y) is bigger, unit_size={unit_size}")
     else:
-        unit_size = scale_to / (max_x - min_y)
-        logging.info(f"horizontal distance (longitude or X) is bigger, unit_size={unit_size}")        
+        unit_size = scale_to / (max_x - min_x)
+        logging.info(f"horizontal distance (longitude or X) is bigger, unit_size={unit_size}")
     geojson['metadata']['scale_unit_size'] = unit_size
-    for f in geojson['features']:
-        for idx in range(len(f['geometry']['coordinates'])):
-            f['geometry']['coordinates'][idx][0] = f['geometry']['coordinates'][idx][0] * unit_size
-            f['geometry']['coordinates'][idx][1] = f['geometry']['coordinates'][idx][1] * unit_size            
+    if scale_to != 0:
+        for f in geojson['features']:
+            for idx in range(len(f['geometry']['coordinates'])):
+                new_x, new_y = converter.convert(geojson, f['geometry']['coordinates'][idx])
+                f['geometry']['coordinates'][idx][0] = new_x * unit_size
+                f['geometry']['coordinates'][idx][1] = new_y * unit_size
     return geojson
 
 def main():
@@ -191,7 +193,7 @@ def main():
                             default="latlon")
     arg_parser.add_argument("-s", "--scale",
                             help="Scale the largest dimension to this size",
-                            default=0, type=int)    
+                            default=0, type=int)
 
     args = arg_parser.parse_args()
     if getattr(args, 'log'):
@@ -200,7 +202,7 @@ def main():
         if not isinstance(numeric_loglevel, int):
             raise ValueError('Invalid log level: %s' % loglevel)
         logging.basicConfig(level=numeric_loglevel)
-        
+
     coordinate_converter = CoordinateConverter(args.coordinate_converter)
 
     geojson = load_geojson(args.input_geojson, coordinate_converter)
@@ -230,8 +232,8 @@ def main():
                 features_to_export.append(feature)
     if features_to_export:
         write_stl(features_to_export, f"{output_dir}/export.stl")
-        write_svg(features_to_export, f"{output_dir}/feature_{idx}.svg")        
-        write_json(features_to_export, f"{output_dir}/feature_{idx}.json")
+        write_svg(features_to_export, f"{output_dir}/features.svg")
+        write_json(features_to_export, f"{output_dir}/features.json")
 
 if __name__ == "__main__":
     main()
