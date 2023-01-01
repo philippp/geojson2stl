@@ -14,14 +14,12 @@ TOTAL_HEIGHT = 1
 scaled_side = 1000
 fn_feature_coord = lambda f: f['geometry']['coordinates']
 fn_feature_elevation = lambda f: int(f['properties']['elevation'])
-layer_height = 0   # Set when the file is loaded.
 
 class CoordinateConverter:
     def __init__(self, setting="latlon"):
         self._converter = getattr(self, f"convert_{setting}", False)
         self.setting = setting
         assert self._converter
-
 
     def convert(self, geojson, lonlat):
         return self._converter(geojson, lonlat)
@@ -50,15 +48,17 @@ def load_geojson(filename: str, coordinate_converter: CoordinateConverter) -> di
     assert 'metadata' in geojson.keys(), "Run geojsonreader.py first"
     return geojson
 
-
-def compute_feature_z_limits(feature: dict, layer_height) -> tuple():
-    layer_idx = feature['properties']['layer_idx']
-    return (layer_idx * layer_height,
-            (layer_idx + 1) * layer_height)
-
-def render_feature_facets(feature: dict, layer_height=1) -> str:
+def render_feature_facets(feature: dict, objectid_to_feature) -> str:
     lines = ""
-    bottom_z, top_z = compute_feature_z_limits(feature, layer_height)
+
+    elevation_z = feature['properties']['elevation_z']
+    height_z = feature['properties']['height_z']
+    bottom_z = elevation_z
+    top_z = elevation_z + height_z
+
+    for tree_child_id in feature['properties'].get('tree_children',[]):
+        child_z = objectid_to_feature[tree_child_id]['geometry']['coordinates'][0][2]
+        top_z = max(top_z, child_z)
     for idx in range(1,len(fn_feature_coord(feature))):
         lines += write_rect_facets(
             fn_feature_coord(feature)[idx-1],
@@ -66,7 +66,6 @@ def render_feature_facets(feature: dict, layer_height=1) -> str:
     lines += write_rect_facets(
         fn_feature_coord(feature)[-1],
         fn_feature_coord(feature)[0], top_z, bottom_z)
-
     return lines
 
 def write_rect_facets(xy1, xy2, height_top, height_bottom=0):
@@ -100,8 +99,11 @@ endfacet
 
 def write_stl(feature_list: list, filename: str):
     lines = ""
+    objectid_to_feature = dict()
+    for f in feature_list:
+        objectid_to_feature[f['properties']['objectid']] = f
     for feature in feature_list:
-        lines += render_feature_facets(feature)
+        lines += render_feature_facets(feature, objectid_to_feature)
     with open(filename,'w') as f:
         f.write("solid myshape\n")
         f.write(lines)
@@ -170,7 +172,9 @@ def scale_features(geojson, converter, scale_to):
     new_z_max = ((geo_meta['max_elevation_m'] - geo_meta['min_elevation_m'])/longest_edge_m)*scale_to
     for f in geojson['features']:
         f_elevation_m = f['properties']['elevation_m']
-        z_value = (f_elevation_m - geo_meta['min_elevation_m']) / longest_edge_m * scale_to
+        z_value = ((f_elevation_m - geo_meta['min_elevation_m']) / longest_edge_m) * scale_to
+        f['properties']['elevation_z'] = z_value
+        f['properties']['height_z'] = (f['properties']['height_m'] / longest_edge_m) * scale_to
         for idx in range(len(f['geometry']['coordinates'])):
             new_x, new_y = converter.convert(geojson, f['geometry']['coordinates'][idx])
             f['geometry']['coordinates'][idx][0] = new_x * unit_size
@@ -184,7 +188,7 @@ def scale_features(geojson, converter, scale_to):
 
 def main():
     arg_parser = argparse.ArgumentParser(
-        prog="GeoJSON2STL",
+        prog="GeoJSON2XYZ",
         description="Attempts to convert a GeoJSON file into a shape file.")
     arg_parser.add_argument("-i", "--input_geojson",
                             help="input geojson file.",
@@ -214,7 +218,6 @@ def main():
         logging.basicConfig(level=numeric_loglevel)
 
     coordinate_converter = CoordinateConverter(args.coordinate_converter)
-
     geojson = load_geojson(args.input_geojson, coordinate_converter)
     scale_features(geojson, coordinate_converter, getattr(args, "scale", 500))
 

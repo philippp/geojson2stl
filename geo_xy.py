@@ -111,7 +111,7 @@ def do_lines_intersect(l1: Line, l2: Line) -> bool:
 def check_inside(polygon: list[Point], probe: Point) -> bool:
     if len(polygon) < 3:
         return False
-    probe_line = Line(probe, (9999, probe[1]))
+    probe_line = Line((probe, (9999, probe[1])))
     intersections = 0
     for i in range(1,len(polygon)):
         cur_side = Line((polygon[i-1], polygon[i]))

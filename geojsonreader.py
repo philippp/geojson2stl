@@ -6,7 +6,7 @@ import logging
 import geo_xy
 import argparse
 import math
-
+import statistics
 # Top left: 37.74153079183624, -122.45901985734845
 # Botom Right: 37.736389093383096, -122.45053356855081
 import inspect
@@ -58,9 +58,13 @@ def update_metadata(geojson):
 
     elevation_list = sorted(all_elevations)
     logging.info(f"Elevations: {elevation_list}")
-    step_sizes = set(int(elevation_list[i] - elevation_list[i-1]) for i in range(1, len(elevation_list)))
-    if len(step_sizes) > 1:
+    step_sizes = list(int(elevation_list[i] - elevation_list[i-1]) for i in range(1, len(elevation_list)))
+    if len(set(step_sizes)) > 1:
         logging.info(f"Found {len(step_sizes)} distinct elevation step changes: {list(step_sizes)}")
+    if step_sizes:
+        geojson['metadata']['median_height_m'] = statistics.median(step_sizes)
+    else:
+        geojson['metadata']['median_height_m'] = 5
     logging.info(f"{len(elevation_list)} layers have data.")
 
     # Longitude gets larger going from west to east (left to right)
@@ -75,6 +79,7 @@ def update_metadata(geojson):
             new_coordinates.append((c_lon,c_lat))
         if feature_coords[0] == feature_coords[-1]:
             f['geometry']['type'] = "Polygon"
+        f['properties']['height_m'] = geojson['metadata']['median_height_m']
         f['properties']['layer_idx'] = elevation_list.index(
             fn_feature_elevation(f))
     return geojson
