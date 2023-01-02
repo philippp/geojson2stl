@@ -37,8 +37,6 @@ class CoordinateConverter:
         y = (geojson['metadata']['max_lat'] - lonlat[1])
         return (x,y)
 
-
-
 # XY[Z] points are specified as (x,y[,z])
 # Lines are specified as ((x,y[,z]),(x,y[,z]))
 
@@ -150,6 +148,13 @@ def write_json(feature_list: list, filename: str):
     with open(filename,'w') as f:
         f.write(json.dumps(dict(feature_list=feature_list), indent=2))
 
+def write_xyz(feature_list:list, filename:str):
+    with open(filename,'w') as f:
+        f.write("X Y Z R G B\n")
+        for feature in feature_list:
+            for coords in feature['geometry']['coordinates']:
+                f.write(f"{coords[0]} {coords[1]} {coords[2]} 0 0 0\n")
+
 def scale_features(geojson, converter, scale_to):
     # Scale X and Y. We scale to a fixed width, and allow height to be
     # proportionate.
@@ -162,12 +167,14 @@ def scale_features(geojson, converter, scale_to):
     if (max_y - min_y) > (max_x - min_x):
         # Y is bigger (map is taller)
         unit_size = scale_to / (max_y - min_y)
-        longest_edge_m = geo_xy.haversine([[x1,y1],[x1,y2]]) * 1000
+        longest_edge_m = geo_xy.haversine([[geo_meta['max_lon'],geo_meta['max_lat']],[geo_meta['max_lon'],geo_meta['min_lat']]]) * 1000
         logging.info(f"Y > X, unit_size={unit_size}, distance={longest_edge_m}")
     else:  # X is bigger (map is wider)
         unit_size = scale_to / (max_x - min_x)
-        longest_edge_m = geo_xy.haversine([[x1,y1],[x2,y1]]) * 1000
+        longest_edge_m = geo_xy.haversine([[geo_meta['max_lon'],geo_meta['max_lat']],[geo_meta['min_lon'],geo_meta['max_lat']]]) * 1000
         logging.info(f"X > Y, unit_size={unit_size}, distance={longest_edge_m}")
+    if not longest_edge_m:
+        longest_edge_m = 100
     geo_meta['scale_unit_size'] = unit_size
     new_z_max = ((geo_meta['max_elevation_m'] - geo_meta['min_elevation_m'])/longest_edge_m)*scale_to
     for f in geojson['features']:
@@ -241,12 +248,14 @@ def main():
                 write_stl([feature], f"{output_dir}/feature_{idx}.stl")
                 write_svg([feature], f"{output_dir}/feature_{idx}.svg")
                 write_json([feature], f"{output_dir}/feature_{idx}.json")
+                write_xyz([feature], f"{output_dir}/feature_{idx}.xyz")
             else:
                 features_to_export.append(feature)
     if features_to_export:
         write_stl(features_to_export, f"{output_dir}/export.stl")
         write_svg(features_to_export, f"{output_dir}/features.svg")
         write_json(features_to_export, f"{output_dir}/features.json")
+        write_xyz(features_to_export, f"{output_dir}/features.xyz")
 
 if __name__ == "__main__":
     main()
