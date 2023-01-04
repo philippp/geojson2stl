@@ -9,10 +9,11 @@ import os
 import datetime
 import logging
 import geo_xy
+import open3d as o3d
 
 TOTAL_HEIGHT = 1
 scaled_side = 1000
-fn_feature_coord = lambda f: f['geometry']['coordinates']
+fn_feature_coord = lambda f: f['geometry']['coordinates'][0]
 fn_feature_elevation = lambda f: int(f['properties']['elevation'])
 
 class CoordinateConverter:
@@ -29,12 +30,12 @@ class CoordinateConverter:
 
     def convert_tanlon(self, geojson, lonlat):
         x = (math.tan(lonlat[0]) - math.tan(geojson['metadata']['min_lon']))
-        y = (geojson['metadata']['max_lat'] - lonlat[1])
+        y = (lonlat[1] - geojson['metadata']['min_lat'])
         return (x,y)
 
     def convert_straight(self, geojson, lonlat):
         x = (lonlat[0] - geojson['metadata']['min_lon'])
-        y = (geojson['metadata']['max_lat'] - lonlat[1])
+        y = (lonlat[1] - geojson['metadata']['min_lat'])
         return (x,y)
 
 # XY[Z] points are specified as (x,y[,z])
@@ -55,7 +56,7 @@ def render_feature_facets(feature: dict, objectid_to_feature) -> str:
     top_z = elevation_z + height_z
 
     for tree_child_id in feature['properties'].get('tree_children',[]):
-        child_z = objectid_to_feature[tree_child_id]['geometry']['coordinates'][0][2]
+        child_z = fn_feature_coord(objectid_to_feature[tree_child_id])[0][2]
         top_z = max(top_z, child_z)
     for idx in range(1,len(fn_feature_coord(feature))):
         lines += write_rect_facets(
@@ -150,10 +151,10 @@ def write_json(feature_list: list, filename: str):
 
 def write_xyz(feature_list:list, filename:str):
     with open(filename,'w') as f:
-        f.write("X Y Z R G B\n")
+        f.write("X Y Z\n")
         for feature in feature_list:
-            for coords in feature['geometry']['coordinates']:
-                f.write(f"{coords[0]} {coords[1]} {coords[2]} 0 0 0\n")
+            for coords in fn_feature_coord(feature):
+                f.write(f"{coords[0]} {coords[1]} {coords[2]}\n")
 
 def scale_features(geojson, converter, scale_to):
     # Scale X and Y. We scale to a fixed width, and allow height to be
@@ -182,15 +183,12 @@ def scale_features(geojson, converter, scale_to):
         z_value = ((f_elevation_m - geo_meta['min_elevation_m']) / longest_edge_m) * scale_to
         f['properties']['elevation_z'] = z_value
         f['properties']['height_z'] = (f['properties']['height_m'] / longest_edge_m) * scale_to
-        for idx in range(len(f['geometry']['coordinates'])):
-            new_x, new_y = converter.convert(geojson, f['geometry']['coordinates'][idx])
-            f['geometry']['coordinates'][idx][0] = new_x * unit_size
-            f['geometry']['coordinates'][idx][1] = new_y * unit_size
-            f['geometry']['coordinates'][idx].append(z_value)
-
-    # Scale Z. Geojsonreader stored the elevation in meters, which we need to scale
-    # based on the physical distance of the largest edge.
-
+        coordinates = fn_feature_coord(f)
+        for idx in range(len(coordinates)):
+            new_x, new_y = converter.convert(geojson, coordinates[idx])
+            coordinates[idx][0] = new_x * unit_size
+            coordinates[idx][1] = new_y * unit_size
+            coordinates[idx].append(z_value)
     return geojson
 
 def main():

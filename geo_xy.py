@@ -35,9 +35,67 @@ def cut_polygon(poly:Polygon, position: float, dimension: int, direction='le') -
     # We iterate over our boundary pairs, create new nodes at the
     # intersection of the boundary and crossing line, and delete
     # the nodes outside of the boundary!
+    iter_poly_idx = 0  # We iterate over the source polygon to build the amended polygon.
+    amended_polygon = list()
     for boundary_pair in idx_boundary_pairs:
-        logging.debug(f"Found boundary pair: {boundary_pair}")
-    return poly
+        # Add a vertex on the box where we exit.
+        post_exit_idx = boundary_pair[0]
+        if post_exit_idx > 0:
+            pre_exit_idx = boundary_pair[0] - 1
+        else:
+            pre_exit_idx = len(poly) - 2  # We end on the initial point, so we jump 2
+
+        post_reentry_idx = boundary_pair[1]
+        if post_reentry_idx > 0:
+            pre_reentry_idx = boundary_pair[1] - 1
+        else:
+            pre_reentry_idx = len(poly) - 2
+
+        new_exit_coord = line_at(
+            (poly[pre_exit_idx], poly[post_exit_idx]),
+            position, dimension)
+        new_reentry_coord = line_at(
+            (poly[pre_reentry_idx], poly[post_reentry_idx]),
+            position, dimension)
+
+        # Populate nodes up to our most recent exit point into the amended polygon.
+        while iter_poly_idx <= pre_exit_idx:
+            amended_polygon.append(poly[iter_poly_idx])
+            iter_poly_idx += 1
+        amended_polygon.append(new_exit_coord)
+        amended_polygon.append(new_reentry_coord)
+        iter_poly_idx = post_reentry_idx
+    while iter_poly_idx < len(poly):
+        amended_polygon.append(poly[iter_poly_idx])
+        iter_poly_idx += 1
+    return amended_polygon
+
+def line_at(l1:Line, position: float, dimension: int) -> Point:
+    # Compute the slope
+    if (l1[1][0] - l1[0][0]) == 0:
+        # The line is vertical!
+        if dimension == 0:
+            # We are enforcing the X value, but the line is fixed as X. 
+            pdb.set_trace()
+        else:
+            return (l1[1][0], position)
+    if (l1[1][1] - l1[0][1]) == 0:
+        # The line is horizontal!
+        if dimension == 1:
+            # We are enforcing the Y value, but the line is fixed as Y.
+            pdb.set_trace()
+        else:
+            return (position, l1[1][1])
+    m = (l1[1][1] - l1[0][1]) / (l1[1][0] - l1[0][0])
+    b = l1[0][1] - m * l1[0][0]
+    output_point = (0,0)
+    if dimension == 0:  # X is fixed
+        target_variable = m * position + b
+        output_point = (position, target_variable)
+    else:  # Y is fixed
+        target_variable = (position - b) / m
+        output_point = (target_variable, position)
+    return output_point
 
 def is_point_in_box(p:Point, max_x_min_y:Point, min_x_max_y:Point) -> bool:
     x_range = sorted([abs(max_x_min_y[0]), abs(min_x_max_y[0])])

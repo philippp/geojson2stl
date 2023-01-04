@@ -35,8 +35,8 @@ def build_island_trees(geojson):
             for f_lower in layermap[lower_layer_idx]:
                 # If an arbitrary point on f is inside or on f_lower,
                 # f is collected to f_lower.
-                f_coords = tuple(f['geometry']['coordinates'][0])
-                if geo_xy.check_inside(f_lower['geometry']['coordinates'], f_coords):
+                f_coords = tuple(geojsonreader.fn_feature_coord(f)[0])
+                if geo_xy.check_inside(geojsonreader.fn_feature_coord(f_lower), f_coords):
                     if 'tree_children' not in f_lower['properties'].keys():
                         f_lower['properties']['tree_children'] = list()
                     f_lower['properties']['tree_children'].append(f['properties']['objectid'])
@@ -80,6 +80,8 @@ def main():
                             required=True)
     arg_parser.add_argument("-o", "--output_dir",
                             help="output directory (will be created if needed).")
+    arg_parser.add_argument("-m", "--min_layers",
+                            default=6, help="Only export islands with at least this many layers")
     arg_parser.add_argument("-l", "--log",
                             help="Set loglevel as DEBUG, INFO, WARNING, ERROR, or CRITICAL.",
                             default="INFO")
@@ -95,10 +97,12 @@ def main():
         output_dir = args.output_dir
     else:
         output_dir = "output-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-
     geojson = load_geojson(args.input_geojson)
     island_trees = build_island_trees(geojson)
     for island_tree in island_trees:
+        if len(island_tree) < args.min_layers:
+            logging.info(f"Skipping island_{island_tree[0]['properties']['objectid']}")
+            continue
         logging.info(f"Exporting island_{island_tree[0]['properties']['objectid']}")
         island_geojson = build_island_geojson_obj(geojson, island_tree)
         island_id = island_geojson['metadata'].get('tree_root_objectid',island_geojson['features'][0]['properties']['objectid'])

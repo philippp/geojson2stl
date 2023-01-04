@@ -12,13 +12,30 @@ import statistics
 import inspect
 
 
-fn_feature_coord = lambda f: f['geometry']['coordinates']
+fn_feature_coord = lambda f: f['geometry']['coordinates'][0]
 ELEVATION_SCALE_TO_M = 0.3048  # Feet to meters - change depending on fn_feature_elevation source.
 fn_feature_elevation = lambda f: int(f['properties']['elevation']) * ELEVATION_SCALE_TO_M
 
 def load(filename: str):
     geojson = json.loads(open(filename,'r').read())
     assert geojson['type'] == 'FeatureCollection', geojson.get('type')
+    multiline_breakouts = list()
+    for f in geojson['features']:
+        if type(f['geometry']['coordinates'][0][0]) != list:
+            coords = list(f['geometry']['coordinates'])
+            f['geometry']['coordinates'] = list()
+            f['geometry']['coordinates'].append(coords)
+        if f['geometry']['type'] == 'MultiLineString':
+            f['geometry']['type'] = 'LineString'
+            for c in f['geometry']['coordinates'][1:]:
+                new_f = dict(f)
+                new_f['geometry']['coordinates'] = list()
+                new_f['geometry']['coordinates'].append(c)
+                multiline_breakouts.append(new_f)
+            orig = f['geometry']['coordinates'][0]
+            f['geometry']['coordinates'] = list()
+            f['geometry']['coordinates'].append(orig)
+    geojson['features'] += multiline_breakouts
     return update_metadata(geojson)
 
 def update_metadata(geojson):
@@ -32,7 +49,10 @@ def update_metadata(geojson):
     all_elevations = set()
     geojson['metadata'] = dict()
     for f in geojson['features']:
-        for c_lon, c_lat in fn_feature_coord(f):
+        for item in fn_feature_coord(f):
+            if len(item) != 2:
+                pdb.set_trace()
+            c_lon, c_lat = item
             if c_lon < min_lon:
                 min_lon = c_lon
             if c_lon > max_lon:
@@ -73,10 +93,7 @@ def update_metadata(geojson):
 
     for idx in range(len(geojson['features'])):
         f = geojson['features'][idx]
-        new_coordinates = list()
         feature_coords = fn_feature_coord(f)
-        for c_lon, c_lat in feature_coords:
-            new_coordinates.append((c_lon,c_lat))
         if feature_coords[0] == feature_coords[-1]:
             f['geometry']['type'] = "Polygon"
         f['properties']['height_m'] = geojson['metadata']['median_height_m']
@@ -87,8 +104,10 @@ def update_metadata(geojson):
 def prune(geojson, left_top, right_bottom):
     feature_list = list()
     for feature in geojson['features']:
-        feature['geometry']['coordinates'] = _prune_coords(feature['geometry']['coordinates'], left_top, right_bottom)
-        if feature['geometry']['coordinates']:
+        current_coordinates = fn_feature_coord(feature)
+        feature['geometry']['coordinates'] = list()
+        feature['geometry']['coordinates'].append(_prune_coords(current_coordinates, left_top, right_bottom))
+        if fn_feature_coord(feature):
             logging.debug(f"[prune] Keeping feature idx={geojson['features'].index(feature)}")
             feature_list.append(feature)
     logging.info(f"[{inspect.stack()[0][3]}] Kept {len(feature_list)} out of {len(geojson['features'])} features.")
