@@ -10,6 +10,9 @@ import datetime
 import logging
 import geo_xy
 import open3d as o3d
+import collections
+import numpy as np
+import math
 
 TOTAL_HEIGHT = 1
 scaled_side = 1000
@@ -149,13 +152,6 @@ def write_json(feature_list: list, filename: str):
     with open(filename,'w') as f:
         f.write(json.dumps(dict(feature_list=feature_list), indent=2))
 
-def write_xyz(feature_list:list, filename:str):
-    with open(filename,'w') as f:
-        f.write("X Y Z\n")
-        for feature in feature_list:
-            for coords in fn_feature_coord(feature):
-                f.write(f"{coords[0]} {coords[1]} {coords[2]}\n")
-
 def scale_features(geojson, converter, scale_to):
     # Scale X and Y. We scale to a fixed width, and allow height to be
     # proportionate.
@@ -191,6 +187,63 @@ def scale_features(geojson, converter, scale_to):
             coordinates[idx].append(z_value)
     return geojson
 
+def augment_feature_points(geojson):
+    # Get the current average point density and XYZ limits.
+    xyz_list = list()
+    max_x, max_y, max_z = (0,0,0)
+    features = filter(lambda f: f['geometry']['type'].lower() == 'polygon', geojson['features'])
+    for coord_list in [fn_feature_coord(f) for f in features]:
+        for c in coord_list:
+            xyz_list.append([c[0], c[1], c[2]])
+            if c[0] > max_x:
+                max_x = c[0]
+            if c[1] > max_y:
+                max_y = c[1]
+            if c[2] > max_z:
+                max_z = c[2]
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(xyz_list)
+    distances = pcd.compute_nearest_neighbor_distance()
+    avg_distance = np.mean(distances)
+    assert avg_distance > 0, f"Distance is {distance}"
+    logging.info(f"max X,Y,Z=({max_x},{max_y},{max_z}) avg_dist={avg_distance}")
+    
+    # We create a rectangle of points at the highest z-index, then
+    # iterate through them and drop them.
+    new_points = list()
+    cur_x, cur_y = (0,0)
+    while cur_x < max_x:
+        cur_x += avg_distance
+        while cur_y < max_y:
+            cur_y += avg_distance
+            z_index = z_at_point(features, cur_x, cur_y)
+            if z_index >= 0:
+                new_points.append((cur_x, cur_y, z_index))
+    logging.info(f"Added {len(new_points)} out of a possible {math.floor(max_x/avg_distance)*math.floor(max_y/avg_distance)} points.")
+    return new_points
+
+def z_at_point(features, cur_x, cur_y):
+    # Sort the polygon layers by z-index, highest to lowest.
+    layer_map = collections.defaultdict(list)
+    for f in features:
+        layer_map[f['properties']['layer_idx']].append(f)
+    layer_indices = sorted(layer_map.keys(), reverse=True)
+    for layer_index in layer_indices:
+        for cur_feature in layer_map[layer_index]:
+            if geo_xy.check_inside(fn_feature_coord(cur_feature), (cur_x, cur_y)):
+                return fn_feature_coord(cur_feature)[0][2]  # Any Z-index will do.
+    return -1
+
+def export_xyz(geojson, filename):
+    new_xyz = augment_feature_points(geojson)
+    with open(filename,'w') as f:
+        f.write("X Y Z\n")
+        for feature in geojson['features']:
+            for coords in fn_feature_coord(feature):
+                f.write(f"{coords[0]} {coords[1]} {coords[2]}\n")
+        for coords in new_xyz:
+            f.write(f"{coords[0]} {coords[1]} {coords[2]}\n")
+
 def main():
     arg_parser = argparse.ArgumentParser(
         prog="GeoJSON2XYZ",
@@ -203,7 +256,7 @@ def main():
     arg_parser.add_argument("-o", "--output_dir",
                             help="output directory (will be created if needed).")
     arg_parser.add_argument("-d", "--debug",
-                            help="write out each feature as an SVG and STL file.",
+                            help="write out each feature as an SVG file.",
                             action="store_true")
     arg_parser.add_argument("-l", "--log",
                             help="Set loglevel as DEBUG, INFO, WARNING, ERROR, or CRITICAL.")
@@ -243,17 +296,15 @@ def main():
         else:
             feature = geojson['features'][idx]
             if getattr(args, 'debug'):
-                write_stl([feature], f"{output_dir}/feature_{idx}.stl")
                 write_svg([feature], f"{output_dir}/feature_{idx}.svg")
                 write_json([feature], f"{output_dir}/feature_{idx}.json")
-                write_xyz([feature], f"{output_dir}/feature_{idx}.xyz")
             else:
                 features_to_export.append(feature)
     if features_to_export:
+        export_xyz(geojson, f"{output_dir}/features.xyz")        
         write_stl(features_to_export, f"{output_dir}/export.stl")
         write_svg(features_to_export, f"{output_dir}/features.svg")
         write_json(features_to_export, f"{output_dir}/features.json")
-        write_xyz(features_to_export, f"{output_dir}/features.xyz")
 
 if __name__ == "__main__":
     main()
